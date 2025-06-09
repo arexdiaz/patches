@@ -1,0 +1,52 @@
+diff --git a/arch/x86/kvm/cpuid.c b/arch/x86/kvm/cpuid.c
+index 9b92f3f56f49..e6b85a271421 100644
+--- a/arch/x86/kvm/cpuid.c
++++ b/arch/x86/kvm/cpuid.c
+@@ -2030,18 +2030,36 @@ EXPORT_SYMBOL_GPL(kvm_cpuid);
+ 
+ int kvm_emulate_cpuid(struct kvm_vcpu *vcpu)
+ {
+-	u32 eax, ebx, ecx, edx;
++    u32 guest_eax_input, guest_ecx_input;
++    u32 result_eax, result_ebx, result_ecx, result_edx;
+ 
+-	if (cpuid_fault_enabled(vcpu) && !kvm_require_cpl(vcpu, 0))
+-		return 1;
++    if (cpuid_fault_enabled(vcpu) && !kvm_require_cpl(vcpu, 0))
++        return 1;
++
++    guest_eax_input = kvm_rax_read(vcpu);
++    guest_ecx_input = kvm_rcx_read(vcpu);
++
++    result_eax = guest_eax_input;
++    result_ecx = guest_ecx_input;
++
++    kvm_cpuid(vcpu, &result_eax, &result_ebx, &result_ecx, &result_edx, false);
+ 
+-	eax = kvm_rax_read(vcpu);
+-	ecx = kvm_rcx_read(vcpu);
+-	kvm_cpuid(vcpu, &eax, &ebx, &ecx, &edx, false);
+-	kvm_rax_write(vcpu, eax);
+-	kvm_rbx_write(vcpu, ebx);
+-	kvm_rcx_write(vcpu, ecx);
+-	kvm_rdx_write(vcpu, edx);
+-	return kvm_skip_emulated_instruction(vcpu);
++    // Leaf indicates the flags that a parent partition specified to create a child partition (https://learn.microsoft.com/en-us/virtualization/hyper-v-on-windows/tlfs/datatypes/hv_partition_privilege_mask)
++    if (guest_eax_input == 0x40000003) {
++        // Ensure this bit is set to 1 (AccessPartitionReferenceCounter).
++        result_ebx |= 0x00000001; // Set bit 0 of result_ebx to 1 using a bitwise OR operation.
++    } else if (guest_eax_input == 0x40000005) { // Hypervisor Implementation Limits
++        result_eax = 0; 	// Maximum number of virtual processors supported
++        result_ebx = 16; 	// Maximum number of logical processors supported
++        result_edx = 0; 	// Reserved bit
++    }
++
++    kvm_rax_write(vcpu, result_eax);
++    kvm_rbx_write(vcpu, result_ebx);
++    kvm_rcx_write(vcpu, result_ecx);
++    kvm_rdx_write(vcpu, result_edx);
++
++    return kvm_skip_emulated_instruction(vcpu);
+ }
++
+ EXPORT_SYMBOL_GPL(kvm_emulate_cpuid);

@@ -1,0 +1,18 @@
+diff --git a/hw/i386/fw_cfg.c b/hw/i386/fw_cfg.c
+index 5c0bcd5f8a..cfa239029b 100644
+--- a/hw/i386/fw_cfg.c
++++ b/hw/i386/fw_cfg.c
+@@ -237,6 +237,13 @@ void fw_cfg_add_acpi_dsdt(Aml *scope, FWCfgState *fw_cfg)
+         aml_io(AML_DECODE16, FW_CFG_IO_BASE, FW_CFG_IO_BASE, 0x01, io_size));
+ 
+     aml_append(dev, aml_name_decl("_CRS", crs));
++    Aml *osi_string_value_in_fwcf = aml_string("Windows 2012");
++    if (osi_string_value_in_fwcf) {
++        Aml *name_decl_in_fwcf = aml_name_decl("OSW2", osi_string_value_in_fwcf);
++        if (name_decl_in_fwcf) {
++            aml_append(dev, name_decl_in_fwcf);
++        }
++    }
+     aml_append(scope, dev);
+ }
+ #endif
