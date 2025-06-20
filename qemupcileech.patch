@@ -1,0 +1,178 @@
+diff --git a/leechcore_device_qemu_pcileech/leechcore_device_qemupcileech.c b/leechcore_device_qemu_pcileech/leechcore_device_qemupcileech.c
+index 5930e38..77261c8 100644
+--- a/leechcore_device_qemu_pcileech/leechcore_device_qemupcileech.c
++++ b/leechcore_device_qemu_pcileech/leechcore_device_qemupcileech.c
+@@ -132,100 +132,95 @@ void InternalClose(PLC_CONTEXT ctxLC)
+ #endif
+ }
+ 
+-uint32_t InternalReadDma(PLC_CONTEXT ctxLC, uint64_t address, uint8_t *buffer, uint64_t length)
+-{
+-    // Send request.
++uint32_t InternalReadDma(PLC_CONTEXT ctxLC, uint64_t address, uint8_t *buffer,
++                         uint64_t length) {
++    /* 1. Send the read request. */
+     PCILEECH_REQUEST_HEADER Request = {.address = address,
+-                                        .command = PCILEECH_REQUEST_READ,
+-                                        .reserved = {0, 0, 0, 0, 0, 0, 0},
+-                                        .length = length};
+-    PCILEECH_RESPONSE_HEADER Response = {0};
++                                       .command = PCILEECH_REQUEST_READ,
++                                       .reserved = {0, 0, 0, 0, 0, 0, 0},
++                                       .length = length};
+     char *buff = (char *)&Request;
+-    int sendlen = 0, recvlen = 0;
+-    while (sendlen < sizeof(Request))
++    int sendlen = 0;
++    while (sendlen < sizeof(Request)) {
+         sendlen += send(QemuPciLeechContext.sock_fd, &buff[sendlen],
+                         sizeof(Request) - sendlen, 0);
+-    // Receive contents.
+-    while (recvlen < length)
+-    {
+-        int resplen = 0, recvlen_i = 0;
+-        buff = (char *)&Response;
+-        // Receive the header.
+-        while (resplen < sizeof(Response))
+-            resplen += recv(QemuPciLeechContext.sock_fd, &buff[resplen],
+-                            sizeof(Response) - resplen, 0);
+-        // Swap endianness if needed.
+-        Response.result = CPU_TO_LE32(Response.result);
+-        Response.length = CPU_TO_LE64(Response.length);
+-        // Check the result.
+-        if (Response.result)
+-        {
+-            char ErrorReason[512];
+-            GetErrorReasonString(Response.result, ErrorReason,
+-                                 sizeof(ErrorReason));
+-            lcprintf(ctxLC,
+-                     "QEMU-PCILeech: DMA-Read Encountered Error! "
+-                     "Reason: %s\n",
+-                     ErrorReason);
++    }
++
++    /* 2. Receive the single response header. */
++    PCILEECH_RESPONSE_HEADER Response = {0};
++    int recvlen = 0;
++    buff = (char *)&Response;
++    while (recvlen < sizeof(Response)) {
++        recvlen += recv(QemuPciLeechContext.sock_fd, &buff[recvlen],
++                        sizeof(Response) - recvlen, 0);
++    }
++
++    /* Swap endianness if needed. */
++    Response.result = CPU_TO_LE32(Response.result);
++    Response.length = CPU_TO_LE64(Response.length);
++
++    /* 3. Check for errors and receive the data payload. */
++    if (Response.result == LEECH_RESULT_OK) {
++        recvlen = 0;
++        while (recvlen < Response.length) {
++            recvlen += recv(QemuPciLeechContext.sock_fd, &buffer[recvlen],
++                            (int)(Response.length - recvlen), 0);
+         }
+-        // Receive contents.
+-        while (recvlen_i < Response.length)
+-            recvlen_i += recv(QemuPciLeechContext.sock_fd,
+-                                &buffer[recvlen + recvlen_i],
+-                                (int)(Response.length - recvlen_i), 0);
+-        // Accumulate counter.
+-        recvlen += recvlen_i;
++    } else {
++        char ErrorReason[512];
++        GetErrorReasonString(Response.result, ErrorReason, sizeof(ErrorReason));
++        lcprintf(ctxLC,
++                 "QEMU-PCILeech: DMA-Read Encountered Error! Reason: %s\n",
++                 ErrorReason);
+     }
++
+     return Response.result;
+ }
+ 
+-uint32_t InternalWriteDma(PLC_CONTEXT ctxLC, uint64_t address, uint8_t* buffer, uint64_t length)
+-{
+-    // Send request.
++uint32_t InternalWriteDma(PLC_CONTEXT ctxLC, uint64_t address, uint8_t *buffer,
++                          uint64_t length) {
++    /* 1. Send the initial request header. */
+     PCILEECH_REQUEST_HEADER Request = {.address = address,
+-                                        .command = PCILEECH_REQUEST_WRITE,
+-                                        .reserved = {0, 0, 0, 0, 0, 0},
+-                                        .length = length};
+-    PCILEECH_RESPONSE_HEADER Response = {0};
++                                       .command = PCILEECH_REQUEST_WRITE,
++                                       .reserved = {0, 0, 0, 0, 0, 0},
++                                       .length = length};
+     char *buff = (char *)&Request;
+     int sendlen = 0;
+-    while (sendlen < sizeof(Request))
++    while (sendlen < sizeof(Request)) {
+         sendlen += send(QemuPciLeechContext.sock_fd, &buff[sendlen],
+                         sizeof(Request) - sendlen, 0);
+-    // Send data.
++    }
++
++    /* 2. Send the entire data buffer at once. */
+     sendlen = 0;
+-    while (sendlen < length)
+-    {
+-        int resplen = 0, sendlen_i = 0;
+-        buff = (char *)&Response;
+-        uint64_t remaining = length - sendlen;
+-        int chunk_size = (remaining > 1024) ? 1024 : (int)remaining;
+-        // Send a segment.
+-        while (sendlen_i < chunk_size)
+-            sendlen_i +=
+-                send(QemuPciLeechContext.sock_fd,
+-                        &buffer[sendlen + sendlen_i], chunk_size - sendlen_i, 0);
+-        // Receive response.
+-        while (resplen < sizeof(Response))
+-            resplen += recv(QemuPciLeechContext.sock_fd, &buff[resplen],
+-                            sizeof(Response) - resplen, 0);
+-        // Swap endianness if needed.
+-        Response.result = CPU_TO_LE32(Response.result);
+-        Response.length = CPU_TO_LE64(Response.length);
+-        // Check the result.
+-        if (Response.result)
+-        {
+-            char ErrorReason[512];
+-            GetErrorReasonString(Response.result, ErrorReason,
+-                                 sizeof(ErrorReason));
+-            lcprintf(ctxLC,
+-                     "QEMU-PCILeech: DMA-Write Encountered Error! "
+-                     "Reason: %s\n",
+-                     ErrorReason);
+-        }
+-        // Accumulate counter.
+-        sendlen += sendlen_i;
++    while (sendlen < length) {
++        sendlen += send(QemuPciLeechContext.sock_fd, &buffer[sendlen],
++                        (int)(length - sendlen), 0);
+     }
++
++    /* 3. Wait for a single, final response from the server. */
++    PCILEECH_RESPONSE_HEADER Response = {0};
++    buff = (char *)&Response;
++    int resplen = 0;
++    while (resplen < sizeof(Response)) {
++        resplen += recv(QemuPciLeechContext.sock_fd, &buff[resplen],
++                        sizeof(Response) - resplen, 0);
++    }
++
++    /* Swap endianness if needed. */
++    Response.result = CPU_TO_LE32(Response.result);
++    Response.length = CPU_TO_LE64(Response.length);
++
++    /* Check the result. */
++    if (Response.result) {
++        char ErrorReason[512];
++        GetErrorReasonString(Response.result, ErrorReason, sizeof(ErrorReason));
++        lcprintf(ctxLC,
++                 "QEMU-PCILeech: DMA-Write Encountered Error! "
++                 "Reason: %s\n",
++                 ErrorReason);
++    }
++
+     return Response.result;
+ }
+ 
